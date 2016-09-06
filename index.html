@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<script src="http://code.jquery.com/jquery-3.1.0.min.js" integrity="sha256-cCueBR6CsyA4/9szpPfrX3s49M9vUU5BgtiJj06wt/s=" crossorigin="anonymous"></script>
+		<!-- https://wavesurfer-js.org/, http://tombyrer.github.io/wavesurfer.js/ -->
+		<!-- <script src="//cdnjs.cloudflare.com/ajax/libs/wavesurfer.js/1.0.52/wavesurfer.min.js"></script> -->
+		<!-- http://www.bbc.co.uk/rd/blog/2013-10-audio-waveforms, http://waveform.prototyping.bbc.co.uk/, https://github.com/bbcrd/peaks.js -->
+		<!-- <script src="http://wzrd.in/standalone/peaks.js"></script> -->
+		<script src="peaks.js"></script>
+		<!-- http://waveformjs.org/, https://github.com/soundcloud/waveformjs -->
+		<!-- <script src="//waveformjs.org/waveform.js"></script> -->
+		
+		<title>JS Waveform test</title>
+	</head>
+	<body>
+		<div id="peaks-container">
+		</div>
+<script>
+var p;
+var b;
+var ac;
+
+function simple_moving_averager(period) {
+	var nums = [];
+	return function(num) {
+		nums.push(num);
+		if (nums.length > period)
+			nums.splice(0,1);  // remove the first element of the array
+		var sum = 0;
+		for (var i in nums)
+			sum += nums[i];
+		var n = period;
+		if (nums.length < period)
+			n = nums.length;
+		return(sum/n);
+	};
+}
+
+// http://www.iamas.ac.jp/~mmiwa/AlleluiaFormant.html
+function getVowel_old(f1, f2) {
+	// f1 *= 0.74;
+	// f2 *= 0.74;
+	// f1 -= 100;
+	// f2 -= 100;
+	if (f1 > 600 && f1 < 1400 && f2 > 900  && f2 < 2000) return "あ";
+	if (f1 > 100 && f1 < 410  && f2 > 1900 && f2 < 3500) return "い";
+	if (f1 > 100 && f1 < 700  && f2 > 1100 && f2 < 2000) return "う";
+	if (f1 > 400 && f1 < 800  && f2 > 1700 && f2 < 3000) return "え";
+	if (f1 > 300 && f1 < 900  && f2 > 500  && f2 < 1300) return "お";
+	return "-";
+}
+
+function getVowel(f1, f2) {
+	var plusMinus = 100;
+	
+	if (f1 > 698 - plusMinus && f1 < 698 + plusMinus && f2 > 1174 - plusMinus  && f2 < 1174 + plusMinus) return 'あ';
+	if (f1 > 311 - plusMinus && f1 < 311 + plusMinus && f2 > 2489 - plusMinus  && f2 < 2489 + plusMinus) return 'い';
+	if (f1 > 391 - plusMinus && f1 < 391 + plusMinus && f2 > 1174 - plusMinus  && f2 < 1174 + plusMinus) return 'う';
+	if (f1 > 440 - plusMinus && f1 < 440 + plusMinus && f2 > 1759 - plusMinus  && f2 < 1759 + plusMinus) return 'え';
+	if (f1 > 466 - plusMinus && f1 < 466 + plusMinus && f2 > 879 - plusMinus  && f2 < 879 + plusMinus) return 'お';
+	return '-';
+}
+
+function formantsToVowel (f1, f2) {
+	if (f1.freq < 200) return '-';
+	if (f1.db < 0.6 && f2.db < 0.6) return '-';
+
+	if (f2.db > 0.5 * f1.db) {
+		if (f1.freq > 200 && f1.freq < 400 && 
+			f2.freq > 3000 && f2.freq < 3500) {
+			return "i";
+		}
+		if (f1.freq > 400 && f1.freq < 600 && 
+			f2.freq > 2200 && f2.freq < 2600) {
+			return "e";
+		}
+	} else {
+		if (f1.freq > 200 && f1.freq < 400) {
+			return "u";
+		}
+		if (f1.freq > 400 && f1.freq < 600) {
+			return "o";
+		}
+		if (f1.freq > 800 && f1.freq < 1200) {
+			return "a";
+		}
+	}
+	return '-';
+}
+
+window.onload = function() {
+	return;
+	/*/
+	var audio = document.createElement('audio');
+	audio.src = 'shop_youngman01_05.wav';
+		
+	p = peaks.init({
+		container: document.querySelector('#peaks-container'),
+		mediaElement: audio,
+		height: 480,
+		waveformBuilderOptions: {
+			scale: 32,
+			scale_adjuster: 192
+		}
+	});
+	
+	p.on('segments.ready', function(){
+		console.log('Segment Ready');
+	});
+	//*/
+	
+	var aContext = ac = new AudioContext();
+	var gNode = aContext.createGain();
+	gNode.gain.value = 1;
+	gNode.connect(aContext.destination);
+	
+	var analyser = aContext.createAnalyser();
+	analyser.fftSize = 2048;
+	analyser.smoothingTimeConstant = 0.04;
+	analyser.connect(gNode);
+
+	function indexToFrequency (i) {
+		return i * aContext.sampleRate / analyser.fftSize;
+	}
+	
+	function valueToPercent (value) {
+		return value / 256;
+	}
+	
+	var  WINDOW_DURATION = 0.04;
+	var sample_rate = aContext.sampleRate;
+	var dt = 1.0 / sample_rate;
+	
+	var window_size = parseInt(WINDOW_DURATION / dt);
+	var df = 1.0 / (window_size / sample_rate);
+	
+	var bufferLength = analyser.frequencyBinCount;
+	var dataArray = new Uint8Array(bufferLength);
+	var dataArray2 = new Uint8Array(bufferLength);
+	var dataArray3 = new Float32Array(bufferLength);
+	var dataArray4 = new Float32Array(bufferLength);
+	analyser.getByteTimeDomainData(dataArray);
+	analyser.getByteFrequencyData(dataArray2);
+	analyser.getFloatTimeDomainData(dataArray3);
+	analyser.getFloatFrequencyData(dataArray4);
+	
+	var f1, f2;
+	var maxf1 = -Infinity, maxf2 = -Infinity;
+	var sma = simple_moving_averager(16);
+	
+	/*
+	console.log(f1);
+	console.log(f2);
+	console.log(maxf1);
+	console.log(maxf2);
+	//*/
+	
+	var bSource = b = aContext.createBufferSource();
+	
+	// console.log(aContext.sampleRate);
+	
+	function analyserFun() {
+		// bSource.start(0);
+		// bSource.start(0, 3);
+		// bSource.stop();
+		
+		analyser.getByteTimeDomainData(dataArray);
+		analyser.getByteFrequencyData(dataArray2);
+		analyser.getFloatTimeDomainData(dataArray3);
+		analyser.getFloatFrequencyData(dataArray4);
+		
+		/*/
+		var is_find_first = false;
+		
+		for (var i = 1; i < dataArray2.length - 1; ++i) {
+			if (dataArray2[i] > dataArray2[i-1] && dataArray2[i] > dataArray2[i+1]) {
+				if (!is_find_first) {
+					f1 = df * i;
+					is_find_first = true;
+				} else {
+					f2 = df * i;
+					break;
+				}
+			}
+		}
+		//*/
+		
+		/*
+		for (var i = 1; i < dataArray2.length - 1; ++i) {
+			console.log(indexToFrequency(i-1));
+		}
+		//*/
+		
+		//*
+		dataArray2.forEach(function(value, i) {
+			var freq = indexToFrequency(i);
+			var db = valueToPercent(sma(value));
+			
+			if (freq < 1500) {
+				if (db > maxf1) {
+					maxf1 = db;
+					f1 = freq;
+				}
+			} else if (freq < 5000) {
+				if (db > maxf2) {
+					maxf2 = db;
+					f2 = freq;
+				}
+			}
+		});
+		//*/
+		
+		console.log('f1: ' + f1 + ', f2: ' + f2);
+		// console.log('db1: ' + maxf1 + ', db2: ' + maxf2);
+		// console.log(getVowel(f1, f2));
+		// console.log(formantsToVowel({db: maxf1, freq: f1}, {db: maxf2, freq: f2}));
+		
+		// console.log(dataArray);
+		// console.log(Math.max.apply(Math, dataArray));
+		// console.log(dataArray2);
+		// console.log(Math.max.apply(Math, dataArray2));
+		// console.log(dataArray3);
+		// console.log(Math.max.apply(Math, dataArray3));
+		// console.log(dataArray4);
+		// console.log(Math.max.apply(Math, dataArray4));
+		// console.log('Min: ' + Math.min.apply(Math, dataArray4) + ', Max: ' + Math.max.apply(Math, dataArray4));
+	}
+	
+	
+	
+	var rawArrayBuffer;
+	
+	var xhRequest = new XMLHttpRequest();
+	xhRequest.open('GET', 'shop_youngman01_05.wav', true);
+	xhRequest.responseType = 'arraybuffer';
+	xhRequest.onload = function(eventObj) {
+		console.log('loaded!');
+		rawArrayBuffer = this.response;
+		aContext.decodeAudioData(rawArrayBuffer, function(bufferData) {
+			console.log('decoded!');
+			bSource.buffer = bufferData;
+			bSource.connect(analyser);
+			
+			// console.log(bSource.buffer.sampleRate);
+			
+			bSource.start(0);
+			
+			var timer = setInterval(function() {
+				analyserFun();
+			}, Math.round(1000 / 60));
+			bSource.onended = function() {
+				console.log('ended!');
+				clearInterval(timer);
+			};
+			
+		});
+	};
+	xhRequest.onerror = function(eventObj) {
+		alert('error!');
+	};
+	
+	xhRequest.send();
+};
+</script>
+	</body>
+</html>
